@@ -13,6 +13,8 @@
 #ifndef __HID_RAZER_KEYBOARD_BLACKWIDOW_CHROMA_H
 #define __HID_RAZER_KEYBOARD_BLACKWIDOW_CHROMA_H
 
+#include "libusb-1.0/libusb.h"
+
 #ifndef USB_VENDOR_ID_RAZER
 #define USB_VENDOR_ID_RAZER 0x1532
 #endif

@@ -12,7 +12,9 @@
 #ifndef DRIVER_RAZERCOMMON_H_
 #define DRIVER_RAZERCOMMON_H_
 
-#include <linux/usb/input.h>
+#include "libusb-1.0/libusb.h"
+
+
 
 #define DRIVER_VERSION "2.3.1"
 #define DRIVER_LICENSE "GPL v2"
@@ -62,6 +64,53 @@ do { \
 #define RAZER_CMD_FAILURE       0x03
 #define RAZER_CMD_TIMEOUT       0x04
 #define RAZER_CMD_NOT_SUPPORTED 0x05
+
+
+#define RAZER_BLACKWIDOW_REPORT_LEN 0x5A
+
+#define RAZER_BLACKWIDOW_CHROMA_WAVE_DIRECTION_LEFT 2
+#define RAZER_BLACKWIDOW_CHROMA_WAVE_DIRECTION_RIGHT 1
+
+#define RAZER_BLACKWIDOW_CHROMA_CHANGE_EFFECT 0x0A
+
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_NONE 0
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_WAVE 1
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_REACTIVE 2
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_BREATH 3
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_SPECTRUM 4
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_CUSTOM 5 // draw frame
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_STATIC 6
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_CLEAR_ROW 8
+
+#define RAZER_BLACKWIDOW_ULTIMATE_2016_EFFECT_STARLIGHT 0x19
+
+
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_SET_KEYS 9 //update profile needs to be called after setting keys to reflect changes
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_RESET 10
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_UNKNOWN 11
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_UNKNOWN2 12
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_UNKNOWN3 13
+#define RAZER_BLACKWIDOW_CHROMA_EFFECT_UNKNOWN4 14
+
+
+#define RAZER_BLACKWIDOW_CHROMA_ROW_LEN 0x16
+#define RAZER_BLACKWIDOW_CHROMA_ROWS_NUM 6
+
+#define RAZER_FIREFLY_ROW_LEN 0x0F
+#define RAZER_FIREFLY_ROWS_NUM 1
+
+
+#define RAZER_STEALTH_ROW_LEN 0x10
+#define RAZER_STEALTH_ROWS_NUM 6
+
+
+
+#define RAZER_BLACKWIDOW_CHROMA_WAIT_MS 1
+#define RAZER_BLACKWIDOW_CHROMA_WAIT_MIN_US 600
+#define RAZER_BLACKWIDOW_CHROMA_WAIT_MAX_US 800
+
+#define RAZER_FIREFLY_WAIT_MIN_US 900
+#define RAZER_FIREFLY_WAIT_MAX_US 1000
 
 struct razer_report;
 
@@ -116,13 +165,16 @@ struct razer_report {
 };
 
 struct razer_key_translation {
-    u16 from;
-    u16 to;
-    u8 flags;
+    uint16_t from;
+    uint16_t to;
+    uint8_t flags;
 };
 
-int razer_send_control_msg(struct usb_device *usb_dev,void const *data, unsigned int report_index, unsigned long wait_min, unsigned long wait_max);
-int razer_get_usb_response(struct usb_device *usb_dev, unsigned int report_index, struct razer_report* request_report, unsigned int response_index, struct razer_report* response_report, unsigned long wait_min, unsigned long wait_max);
+struct razer_report razer_send_payload(libusb_device_handle *usb_dev, struct razer_report *request_report);
+int razer_get_report(libusb_device_handle *usb_dev, struct razer_report *request_report, struct razer_report *response_report);
+
+int razer_send_control_msg(libusb_device_handle *usb_dev,void const *data, unsigned int report_index, unsigned long wait_min, unsigned long wait_max);
+int razer_get_usb_response(libusb_device_handle *usb_dev, unsigned int report_index, struct razer_report* request_report, unsigned int response_index, struct razer_report* response_report, unsigned long wait_min, unsigned long wait_max);
 unsigned char razer_calculate_crc(struct razer_report *report);
 struct razer_report get_razer_report(unsigned char command_class, unsigned char command_id, unsigned char data_size);
 struct razer_report get_empty_razer_report(void);

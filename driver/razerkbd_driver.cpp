@@ -18,27 +18,11 @@
  */
 
 
-#include <linux/kernel.h>
-#include <linux/slab.h>
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/usb/input.h>
-#include <linux/hid.h>
-#include <linux/dmi.h>
-
 #include "razerkbd_driver.h"
 #include "razercommon.h"
 #include "razerchromacommon.h"
-
-/*
- * Version Information
- */
-#define DRIVER_DESC "Razer Keyboard Device Driver"
-
-MODULE_AUTHOR(DRIVER_AUTHOR);
-MODULE_DESCRIPTION(DRIVER_DESC);
-MODULE_VERSION(DRIVER_VERSION);
-MODULE_LICENSE(DRIVER_LICENSE);
+#include <string.h>
+#include <stdio.h>
 
 // M1-M5 is F13-F17
 #define RAZER_MACRO_KEY 188 // 188 = KEY_F18
@@ -91,64 +75,26 @@ static const struct razer_key_translation chroma_keys_2[] = {
     { }
 };
 
-/**
- * Essentially search through the struct array above.
- */
-static const struct razer_key_translation *find_translation(const struct razer_key_translation *key_table, u16 from)
-{
-    const struct razer_key_translation *result;
 
-    for (result = key_table; result->from; result++) {
-        if (result->from == from) {
-            return result;
-        }
-    }
-
-    return NULL;
-}
-
-static bool is_blade_laptop(struct usb_device *usb_dev)
-{
-    switch (usb_dev->descriptor.idProduct) {
-    case USB_DEVICE_ID_RAZER_BLADE_STEALTH:
-    case USB_DEVICE_ID_RAZER_BLADE_STEALTH_LATE_2016:
-    case USB_DEVICE_ID_RAZER_BLADE_PRO_LATE_2016:
-    case USB_DEVICE_ID_RAZER_BLADE_2018:
-    case USB_DEVICE_ID_RAZER_BLADE_QHD:
-    case USB_DEVICE_ID_RAZER_BLADE_LATE_2016:
-    case USB_DEVICE_ID_RAZER_BLADE_STEALTH_MID_2017:
-    case USB_DEVICE_ID_RAZER_BLADE_STEALTH_LATE_2017:
-    case USB_DEVICE_ID_RAZER_BLADE_PRO_2017:
-    case USB_DEVICE_ID_RAZER_BLADE_PRO_2017_FULLHD:
-        return true;
-    }
-    return false;
-}
 
 /**
  * Send report to the keyboard
  */
-static int razer_get_report(struct usb_device *usb_dev, struct razer_report *request_report, struct razer_report *response_report)
+static int razer_get_report(struct libusb_device_handle *usb_dev, struct razer_report *request_report, struct razer_report *response_report)
 {
-    uint report_index;
-    uint response_index;
-    switch (usb_dev->descriptor.idProduct) {
-    case USB_DEVICE_ID_RAZER_ANANSI:
-        report_index = 0x02;
-        response_index = 0x02;
-        break;
-    default:
+    uint8_t report_index;
+    uint8_t response_index;
+
         report_index = 0x01;
         response_index = 0x01;
-        break;
-    }
+
     return razer_get_usb_response(usb_dev, report_index, request_report, response_index, response_report, RAZER_BLACKWIDOW_CHROMA_WAIT_MIN_US, RAZER_BLACKWIDOW_CHROMA_WAIT_MAX_US);
 }
 
 /**
  * Function to send to device, get response, and actually check the response
  */
-static struct razer_report razer_send_payload(struct usb_device *usb_dev, struct razer_report *request_report)
+static struct razer_report razer_send_payload(struct libusb_device_handle *usb_dev, struct razer_report *request_report)
 {
     int retval = -1;
     struct razer_report response_report;
@@ -184,10 +130,8 @@ static struct razer_report razer_send_payload(struct usb_device *usb_dev, struct
  *
  * Returns a string
  */
-static ssize_t razer_attr_read_kbd_layout(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t razer_attr_read_kbd_layout(struct libusb_device_handle *usb_dev, struct device_attribute *attr, char *buf)
 {
-    struct usb_interface *intf = to_usb_interface(dev->parent);
-    struct usb_device *usb_dev = interface_to_usbdev(intf);
     struct razer_report report = get_razer_report(0x00, 0x86, 0x02);
     struct razer_report response = razer_send_payload(usb_dev, &report);
 
@@ -197,62 +141,15 @@ static ssize_t razer_attr_read_kbd_layout(struct device *dev, struct device_attr
 /**
  * Device mode function
  */
-void razer_set_device_mode(struct usb_device *usb_dev, unsigned char mode, unsigned char param)
+void razer_set_device_mode(struct libusb_device_handle *usb_dev, unsigned char mode, unsigned char param)
 {
     struct razer_report report = razer_chroma_standard_set_device_mode(mode, param);
 
-    if (is_blade_laptop(usb_dev)) {
-        return;
-    }
 
-    switch(usb_dev->descriptor.idProduct) {
-    case USB_DEVICE_ID_RAZER_ORNATA:
-    case USB_DEVICE_ID_RAZER_ORNATA_CHROMA:
-    case USB_DEVICE_ID_RAZER_CYNOSA_CHROMA:
-        report.transaction_id.id = 0x3F;
-        break;
-    }
 
     razer_send_payload(usb_dev, &report);
 }
 
-/**
- * Write device file "mode_game"
- *
- * When 1 is written (as a character, 0x31) Game mode will be enabled, if 0 is written (0x30)
- * then game mode will be disabled
- *
- * The reason the keyboard appears as 2 keyboard devices is that one of those devices is used by
- * game mode as that keyboard device is missing a super key. A hacky and over-the-top way to disable
- * the super key if you ask me.
- */
-static ssize_t razer_attr_write_mode_game(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-    struct usb_interface *intf = to_usb_interface(dev->parent);
-    struct usb_device *usb_dev = interface_to_usbdev(intf);
-    unsigned char enabled = (unsigned char)simple_strtoul(buf, NULL, 10);
-    struct razer_report report = razer_chroma_standard_set_led_state(VARSTORE, GAME_LED, enabled);
-
-    razer_send_payload(usb_dev, &report);
-
-    return count;
-}
-
-/**
- * Read device file "game_mode"
- *
- * Returns a string
- */
-static ssize_t razer_attr_read_mode_game(struct device *dev, struct device_attribute *attr, char *buf)
-{
-    struct usb_interface *intf = to_usb_interface(dev->parent);
-    struct usb_device *usb_dev = interface_to_usbdev(intf);
-    struct razer_report report = razer_chroma_standard_get_led_state(VARSTORE, GAME_LED);
-    struct razer_report response;
-
-    response = razer_send_payload(usb_dev, &report);
-    return sprintf(buf, "%d\n", response.arguments[2]);
-}
 
 /**
  * Write device file "mode_macro"
@@ -260,10 +157,9 @@ static ssize_t razer_attr_read_mode_game(struct device *dev, struct device_attri
  * When 1 is written (as a character, 0x31) Macro mode will be enabled, if 0 is written (0x30)
  * then game mode will be disabled
  */
-static ssize_t razer_attr_write_mode_macro(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t razer_attr_write_mode_macro(struct libusb_device_handle *usb_dev, struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct usb_interface *intf = to_usb_interface(dev->parent);
-    struct usb_device *usb_dev = interface_to_usbdev(intf);
+
     unsigned char enabled = (unsigned char)simple_strtoul(buf, NULL, 10);
     struct razer_report report = razer_chroma_standard_set_led_state(VARSTORE, MACRO_LED, enabled);
 
@@ -716,7 +612,7 @@ static ssize_t razer_attr_write_mode_wave(struct device *dev, struct device_attr
     struct usb_interface *intf = to_usb_interface(dev->parent);
     struct usb_device *usb_dev = interface_to_usbdev(intf);
     unsigned char direction = (unsigned char)simple_strtoul(buf, NULL, 10);
-    struct razer_report report;
+
 
     switch(usb_dev->descriptor.idProduct) {
     case USB_DEVICE_ID_RAZER_ORNATA:
@@ -725,15 +621,14 @@ static ssize_t razer_attr_write_mode_wave(struct device *dev, struct device_attr
         report = razer_chroma_extended_matrix_effect_wave(VARSTORE, BACKLIGHT_LED, direction);
         break;
     case USB_DEVICE_ID_RAZER_BLACKWIDOW_CHROMA_V2:
-        report = razer_chroma_standard_matrix_effect_wave(VARSTORE, BACKLIGHT_LED, direction);
-        report.transaction_id.id = 0x3F;  // TODO move to a usb_device variable
+
         break;
 
     default:
         report = razer_chroma_standard_matrix_effect_wave(VARSTORE, BACKLIGHT_LED, direction);
         break;
     }
-    razer_send_payload(usb_dev, &report);
+
 
     return count;
 }

@@ -7,49 +7,54 @@
  * Software Foundation; either version 2 of the License, or (at your option)
  * any later version.
  */
-#include <linux/kernel.h>
-#include <linux/slab.h>
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/hid.h>
-
-
+#include "libusb-1.0/libusb.h"
+#include <logger/log.h>
+#include <unistd.h>
 #include "razercommon.h"
+
+void* memdup(const void* mem, size_t size) {
+   void* out = malloc(size);
+
+   if(out != NULL)
+       memcpy(out, mem, size);
+
+   return out;
+}
 
 /**
  * Send USB control report to the keyboard
  * USUALLY index = 0x02
  * FIREFLY is 0
  */
-int razer_send_control_msg(struct usb_device *usb_dev,void const *data, uint report_index, ulong wait_min, ulong wait_max)
+int razer_send_control_msg(libusb_device_handle *usb_dev,void const *data, uint report_index, ulong wait_min, ulong wait_max)
 {
-    uint request = HID_REQ_SET_REPORT; // 0x09
-    uint request_type = USB_TYPE_CLASS | USB_RECIP_INTERFACE | USB_DIR_OUT; // 0x21
+    uint request = 0x09;
+    uint request_type = (0x01 << 5) | 1 | 0; // 0x21
     uint value = 0x300;
     uint size = RAZER_USB_REPORT_LEN;
     char *buf;
     int len;
 
-    buf = kmemdup(data, size, GFP_KERNEL);
+    buf = (char*)memdup(data, size);
     if (buf == NULL)
         return -ENOMEM;
 
     // Send usb control message
-    len = usb_control_msg(usb_dev, usb_sndctrlpipe(usb_dev, 0),
-                          request,      // Request
-                          request_type, // RequestType
-                          value,        // Value
-                          report_index, // Index
-                          buf,          // Data
-                          size,         // Length
-                          USB_CTRL_SET_TIMEOUT);
+    len = libusb_control_transfer(usb_dev,
+                                  request_type, // RequestType
+                                  request,      // Request
+                                  value,        // Value
+                                  report_index, // Index
+                                  (uchar*)buf,          // Data
+                                  size,         // Length
+                                  100);
 
     // Wait
-    usleep_range(wait_min, wait_max);
+    usleep(wait_min);
 
-    kfree(buf);
+    free(buf);
     if(len!=size)
-        printk(KERN_WARNING "razer driver: Device data transfer failed.");
+        WARN<< "razer driver: Device data transfer failed."<<len;
 
     return ((len < 0) ? len : ((len != size) ? -EIO : 0));
 }
@@ -71,10 +76,10 @@ int razer_send_control_msg(struct usb_device *usb_dev,void const *data, uint rep
  *
  * Returns 0 when successful, 1 if the report length is invalid.
  */
-int razer_get_usb_response(struct usb_device *usb_dev, uint report_index, struct razer_report* request_report, uint response_index, struct razer_report* response_report, ulong wait_min, ulong wait_max)
+int razer_get_usb_response(libusb_device_handle *usb_dev, uint report_index, struct razer_report* request_report, uint response_index, struct razer_report* response_report, ulong wait_min, ulong wait_max)
 {
-    uint request = HID_REQ_GET_REPORT; // 0x01
-    uint request_type = USB_TYPE_CLASS | USB_RECIP_INTERFACE | USB_DIR_IN; // 0xA1
+    uint request = 1; // 0x01
+    uint request_type =  0xA1;
     uint value = 0x300;
 
     uint size = RAZER_USB_REPORT_LEN; // 0x90
@@ -83,7 +88,7 @@ int razer_get_usb_response(struct usb_device *usb_dev, uint report_index, struct
     int result = 0;
     char *buf;
 
-    buf = kzalloc(sizeof(struct razer_report), GFP_KERNEL);
+    buf = (char*)malloc(sizeof(struct razer_report));
     if (buf == NULL)
         return -ENOMEM;
 
@@ -92,23 +97,24 @@ int razer_get_usb_response(struct usb_device *usb_dev, uint report_index, struct
     retval = razer_send_control_msg(usb_dev, request_report, report_index, wait_min, wait_max);
 
     // Now ask for reponse
-    len = usb_control_msg(usb_dev, usb_rcvctrlpipe(usb_dev, 0),
-                          request,         // Request
+    len = libusb_control_transfer(usb_dev,
                           request_type,    // RequestType
+                                  request,         // Request
                           value,           // Value
                           response_index,  // Index
-                          buf,             // Data
+                          (uchar*)buf,             // Data
                           size,
-                          USB_CTRL_SET_TIMEOUT);
+                          100);
 
-    usleep_range(wait_min, wait_max);
+    usleep(wait_min);
 
     memcpy(response_report, buf, sizeof(struct razer_report));
-    kfree(buf);
+
+    free(buf);
 
     // Error if report is wrong length
     if(len != 90) {
-        printk(KERN_WARNING "razer driver: Invalid USB repsonse. USB Report length: %d\n", len);
+        WARN << "razer driver: Invalid USB repsonse. USB Report length: "<<len;
         result = 1;
     }
 
@@ -172,7 +178,7 @@ struct razer_report get_empty_razer_report(void)
  */
 void print_erroneous_report(struct razer_report* report, char* driver_name, char* message)
 {
-    printk(KERN_WARNING "%s: %s. Start Marker: %02x id: %02x Num Params: %02x Reserved: %02x Command: %02x Params: %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x .\n",
+    printf("%s: %s. Start Marker: %02x id: %02x Num Params: %02x Reserved: %02x Command: %02x Params: %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x .\n",
            driver_name,
            message,
            report->status,
