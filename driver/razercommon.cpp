@@ -21,6 +21,48 @@ void* memdup(const void* mem, size_t size) {
    return out;
 }
 
+int razer_get_report(libusb_device_handle *usb_dev, struct razer_report *request_report, struct razer_report *response_report)
+{
+    uint report_index;
+    uint response_index;
+
+    report_index = 0x01;
+    response_index = 0x01;
+
+    return razer_get_usb_response(usb_dev, report_index, request_report, response_index, response_report, RAZER_BLACKWIDOW_CHROMA_WAIT_MIN_US, RAZER_BLACKWIDOW_CHROMA_WAIT_MAX_US);
+}
+
+struct razer_report razer_send_payload(libusb_device_handle *usb_dev, struct razer_report *request_report)
+{
+    int retval = -1;
+    struct razer_report response_report;
+
+    request_report->crc = razer_calculate_crc(request_report);
+
+    retval = razer_get_report(usb_dev, request_report, &response_report);
+
+    if(retval == 0) {
+        // Check the packet number, class and command are the same
+        if(response_report.remaining_packets != request_report->remaining_packets ||
+           response_report.command_class != request_report->command_class ||
+           response_report.command_id.id != request_report->command_id.id) {
+            print_erroneous_report(&response_report, "razerkbd", "Response doesnt match request");
+//		} else if (response_report.status == RAZER_CMD_BUSY) {
+//			print_erroneous_report(&response_report, "razerkbd", "Device is busy");
+        } else if (response_report.status == RAZER_CMD_FAILURE) {
+            print_erroneous_report(&response_report, "razerkbd", "Command failed");
+        } else if (response_report.status == RAZER_CMD_NOT_SUPPORTED) {
+            print_erroneous_report(&response_report, "razerkbd", "Command not supported");
+        } else if (response_report.status == RAZER_CMD_TIMEOUT) {
+            print_erroneous_report(&response_report, "razerkbd", "Command timed out");
+        }
+    } else {
+        print_erroneous_report(&response_report, "razerkbd", "Invalid Report Length");
+    }
+
+    return response_report;
+}
+
 /**
  * Send USB control report to the keyboard
  * USUALLY index = 0x02
